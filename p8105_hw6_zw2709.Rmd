@@ -7,7 +7,7 @@ output: github_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r, include = False}
+```{r}
 library(tidyverse)
 library(modelr)
 library(mgcv)
@@ -103,8 +103,183 @@ models_results_df %>%
 ```
 
 
+## Problem 2
+
+Find some residuals
+
+```{r}
+baby_df = 
+  read_csv("./data/birthweight.csv") %>% 
+  janitor::clean_names() %>% 
+  
+  #convert numeric to factor
+  mutate(
+    babysex = case_when(
+      babysex == 1 ~ "Male",
+      babysex == 2 ~ "Female"),
+    babysex = as.factor(babysex),
+    frace = case_when(
+      frace == 1 ~ "White",
+      frace == 2 ~ "Black",
+      frace == 3 ~ "Asian",
+      frace == 4 ~ "Puerto Rican",
+      frace == 8 ~ "Other"),
+    frace = as.factor(frace),
+    malform = case_when(
+      malform == 0 ~ "absent",
+      malform == 1 ~ "present"),
+    malform = as.factor(malform),
+    mrace = case_when(
+      mrace == 1 ~ "White",
+      mrace == 2 ~ "Black",
+      mrace == 3 ~ "Asian",
+      mrace == 4 ~ "Puerto Rican",
+      mrace == 8 ~ "Other"),
+    mrace = as.factor(mrace)
+    
+  )
+    
+```
 
 
+There seems to have no missing data in the baby_df, and we could analyze the data using `r nrow(baby_df)` observations.
+
+
+
+
+## fit a model
+
+try to use linear regression model using all possible predictors and check the p value
+
+```{r}
+all_fit = lm(bwt ~ ., data = baby_df)
+summary(all_fit)
+```
+
+And we might choose the model with predictors which is significant at 5% significance level, meaning the corresponding p value is less than 0.05
+
+bwt ~ babysex + bhead + blength + delwt + gaweeks + parity + smoken
+
+
+Therefore the fitted model and its information are as follows:
+
+```{r}
+mod_fit = lm(bwt ~ babysex + bhead + blength + delwt + gaweeks + parity + smoken, data = baby_df)
+
+broom::tidy(mod_fit) %>% 
+  knitr::kable(digits = 3)
+```
+
+
+
+Then we need to make the plot based on the model residuals against the fitted values
+
+Treat the residuals as y values and the predictions as x values
+
+```{r}
+baby_df %>% 
+  add_predictions(mod_fit) %>% 
+  add_residuals(mod_fit) %>% 
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point(alpha = 0.3)+
+  geom_smooth(method = "lm")
+  
+```
+
+
+
+The residuals bounce around 0 and it seems to form a horizontal line around 0.
+
+
+
+## Compare to two other models
+
+
+* Model 1
+
+bwt ~ blength + gaweeks
+```{r}
+one_fit = lm(bwt ~ blength + gaweeks, data = baby_df)
+
+broom::tidy(one_fit) %>% 
+  knitr::kable(digits = 3)
+```
+
+
+
+* Model 2
+
+bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex
+
+```{r}
+two_fit = lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex, data = baby_df)
+
+broom::tidy(two_fit) %>% 
+  knitr::kable(digits = 3)
+```
+
+
+
+Cross validation
+
+```{r}
+cv_df = 
+  crossv_mc(baby_df, 100) %>% 
+  mutate(
+    train = map(train, as_tibble), 
+    test = map(test, as_tibble)
+  )
+```
+
+```{r}
+cv_df = 
+  cv_df %>% 
+  mutate(
+    mod_fit = map(.x = train, ~lm(bwt~ babysex + bhead + blength + delwt + gaweeks + parity + smoken, data = .x)),
+    one_fit = map(.x = train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    two_fit = map(.x = train, ~lm(bwt ~ bhead + blength + babysex + bhead * blength + bhead * babysex + blength * babysex + bhead * blength * babysex, data = .x))
+    
+  ) %>% 
+  mutate(
+    rmse_mod = map2_dbl(.x = mod_fit, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_one = map2_dbl(.x = one_fit, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_two = map2_dbl(.x = two_fit, .y = test, ~rmse(model = .x, data = .y))
+  )
+```
+
+```{r}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin()
+```
+
+
+```{r}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  group_by(model) %>% 
+  summarize(avg_rmse = mean(rmse))
+```
+
+
+
+
+The RMSE of model 1 is the largest, so it is not good fit because of large errors.
+The model 2 and mod_fit has similar RMSE but mod_fit has smaller RMSE, so mod_fit would be the best model fit among the three ones.
 
 
 
