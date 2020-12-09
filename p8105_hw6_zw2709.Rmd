@@ -258,7 +258,12 @@ cv_df %>%
   ) %>% 
   
   ggplot(aes(x = model, y = rmse)) +
-  geom_violin()
+  geom_violin()+
+  labs(
+    title = "violin plot and RMSE of three models",
+    x = "model",
+    y = "RMSE"
+  )
 ```
 
 
@@ -285,10 +290,121 @@ The model 2 and mod_fit has similar RMSE but mod_fit has smaller RMSE, so mod_fi
 
 
 
+## Problem 3
+
+data import
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+
+use tmax as response(y) and use tmin as predictor(x)
+
+```{r}
+boot = 
+  weather_df %>% 
+  bootstrap(5000, id = "strap_number") %>% 
+  mutate(
+    models = map(.x = strap, ~lm(tmax ~ tmin, data = .x)),
+    results = map(models, broom::tidy),
+    square = map(models, broom::glance)
+  ) %>% 
+  select(strap_number, results, square) %>% 
+  unnest(results, square) %>% 
+  select(strap_number,term, estimate, r.squared)
+```
+
+
+```{r}
+r_square = 
+  boot %>% 
+  filter(term == "tmin") %>% 
+  select(strap_number, r.squared) 
+r_square
+
+```
+
+```{r}
+r_square %>% 
+  ggplot(aes(x = r.squared))+
+  geom_density(alpha = 0.3) +
+  labs(
+    title = "distribution of estimated R squared",
+    x = "R squared",
+    y = "density"
+  )
+
+```
+The 5000 r.squared numbers are listed and the distribution of it has been shown. 
+It is approximately normal distributed for R squared. The mean value of R squared is `r mean(pull(r_square, r.squared))`. Since the mean value is close to 1, meaning there is a good fit for the model.
+
+
+
+```{r}
+beta = 
+  boot %>% 
+  select(-r.squared) %>% 
+  pivot_wider(
+    names_from = "term",
+    values_from = "estimate"
+  ) %>% 
+  rename(intercept = "(Intercept)") %>% 
+  mutate(log = log(intercept * tmin))
+beta
+
+
+```
+```{r}
+beta %>% 
+  ggplot(aes(x = log))+
+  geom_density(alpha = 0.3) +
+  labs(
+    title = "distribution of estimated log(beta0 * beta1)",
+    x = "log(beta0 * beta1)",
+    y = "density"
+  )
+```
+The 5000 observations of log(beta0 * beta1) are listed with the distribution of it.
+It is approximately normal with the mean log(beta0 * beta1) equaling to `r mean(pull(beta, log))`.
 
 
 
 
 
+
+* provide the 95% confidence interval
+
+```{r}
+r_square %>% 
+  summarize(
+    ci_lower = quantile(r.squared, 0.025),
+    ci_upper = quantile(r.squared, 0.975)
+  ) 
+```
+
+The 95% confidence interval for R squared is (0.894, 0.927)
+
+
+
+
+```{r}
+beta %>% 
+  summarize(
+    ci_lower = quantile(log, 0.025),
+    ci_upper = quantile(log, 0.975)
+  ) 
+```
+
+The 95% confidence interval for log(beta0 * beta1) is (1.965, 2.058).
 
 
